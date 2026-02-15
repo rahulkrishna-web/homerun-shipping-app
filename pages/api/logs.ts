@@ -20,7 +20,12 @@ export default async function handler(
       );
     `;
 
-    const result = await sql`SELECT * FROM webhook_logs ORDER BY date DESC LIMIT 50;`;
+    const result = await sql`
+      SELECT id, date, status, message, payload, flow_log
+      FROM webhook_logs 
+      ORDER BY date DESC 
+      LIMIT 50;
+    `;
     
     res.status(200).json({ logs: result.rows });
   } catch (error: any) {

@@ -22,7 +22,17 @@ export default async function handler(
     // The user wants to start with adding a test-ofd tag.
     // We assume the payload contains an 'id' which is the Order ID, or we extract it.
     
-    // Log helper
+    // Flow Log Helper
+    const flowLog: any[] = [];
+    const addLog = (step: string, detail: any = null) => {
+        const entry = { timestamp: new Date().toISOString(), step, detail };
+        console.log(`[Flow] ${step}`, detail ? JSON.stringify(detail) : '');
+        flowLog.push(entry);
+    };
+
+    addLog('Webhook received', { topic, shop });
+
+    // DB Logger
     const logEvent = async (status: string, message: string, payload: any) => {
       try {
         await sql`
@@ -31,12 +41,13 @@ export default async function handler(
             date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             status VARCHAR(50),
             message TEXT,
-            payload JSONB
+            payload JSONB,
+            flow_log JSONB
           );
         `;
         await sql`
-          INSERT INTO webhook_logs (status, message, payload)
-          VALUES (${status}, ${message}, ${JSON.stringify(payload)});
+          INSERT INTO webhook_logs (status, message, payload, flow_log)
+          VALUES (${status}, ${message}, ${JSON.stringify(payload)}, ${JSON.stringify(flowLog)});
         `;
       } catch (dbError) {
         console.error('Database Error:', dbError);
@@ -44,65 +55,74 @@ export default async function handler(
     };
 
     let orderId = body.id;
+    addLog('Initial Order ID check', { orderId });
     
     // Handle nested payload from shipping provider
     if (!orderId && body.data && body.data.order && body.data.order.id) {
       orderId = body.data.order.id;
+      addLog('Found Order ID in nested payload', { orderId });
     }
 
-    // Handle 'fulfillment_events/create' or 'orders/updated' or custom shipping payload
-    // If it's a custom payload, we need to know the structure.
-    // Assuming standard Shopify payload or simple ID map for now.
-
     if (!orderId) {
+       addLog('Error: No Order ID found');
        await logEvent('ERROR', 'No Order ID found', body);
        return res.status(400).json({ message: 'No Order ID found' });
     }
 
-    await logEvent('INFO', `Processing Order ${orderId}`, body);
+    addLog('Processing Order', { orderId });
 
-    // 1. Add 'test-ofd' tag (Existing logic)
-    const order = await shopify.order.get(orderId, { fields: 'id,tags,fulfillments' });
-    const specificTag = 'test-ofd';
-    const currentTags = order.tags ? order.tags.split(',').map((t: string) => t.trim()) : [];
-    
-    if (!currentTags.includes(specificTag)) {
-      const newTags = [...currentTags, specificTag].join(',');
-      await shopify.order.update(orderId, { tags: newTags });
-      await logEvent('SUCCESS', `Added tag ${specificTag}`, {});
-    }
+    // 1. Add 'test-ofd' tag
+    try {
+        addLog('Fetching Order from Shopify');
+        const order = await shopify.order.get(orderId, { fields: 'id,tags,fulfillments' });
+        addLog('Order Fetched', { tags: order.tags, fulfillmentCount: order.fulfillments?.length });
 
-    // 2. Update Fulfillment Status to "Out for Delivery"
-    // We need to find the fulfillment ID.
-    // Takes the first open fulfillment.
-    const fulfillments = order.fulfillments || [];
-    const openFulfillment = fulfillments.find((f: any) => f.status === 'success' || f.status === 'open' || f.status === 'processing'); // specific logic might vary
+        const specificTag = 'test-ofd';
+        const currentTags = order.tags ? order.tags.split(',').map((t: string) => t.trim()) : [];
+        
+        if (!currentTags.includes(specificTag)) {
+            const newTags = [...currentTags, specificTag].join(',');
+            await shopify.order.update(orderId, { tags: newTags });
+            addLog('Tag added', { tag: specificTag });
+        } else {
+            addLog('Tag already exists', { tag: specificTag });
+        }
 
-    if (openFulfillment) {
-      // Create a fulfillment event. 
-      // Statuses: 'confirmed', 'in_transit', 'out_for_delivery', 'delivered', 'failure'
-      // "In Progress" in UI usually maps to 'in_transit' or 'out_for_delivery'.
-      // User asked for "In progress", which usually means 'in_transit'.
-      // But triggering on "Out for Delivery" event suggesting 'out_for_delivery' status.
-      // Let's use 'out_for_delivery' as it's more specific to the event.
-      
-      try {
-        await shopify.fulfillmentEvent.create(openFulfillment.id, { status: 'in_transit' });
-        await logEvent('SUCCESS', `Updated fulfillment ${openFulfillment.id} to in_transit`, {});
-      } catch (fError: any) {
-         await logEvent('ERROR', `Failed to update fulfillment: ${fError.message}`, {});
-         console.error('Fulfillment Update Error', fError);
-      }
-    } else {
-       await logEvent('WARNING', 'No open fulfillment found to update', {});
+        // 2. Update Fulfillment Status
+        const fulfillments = order.fulfillments || [];
+        // Filter for open fulfillments
+        const openFulfillment = fulfillments.find((f: any) => f.status === 'success' || f.status === 'open' || f.status === 'processing' || f.status === null); 
+        
+        addLog('Searching for open fulfillment', { 
+            found: !!openFulfillment, 
+            fulfillmentId: openFulfillment?.id,
+            allFulfillments: fulfillments.map((f:any) => ({ id: f.id, status: f.status }))
+        });
+
+        if (openFulfillment) {
+            try {
+                addLog('Attempting to create fulfillment event', { status: 'in_transit' });
+                await shopify.fulfillmentEvent.create(openFulfillment.id, { status: 'in_transit' });
+                addLog('Fulfillment event created successfully');
+                await logEvent('SUCCESS', `Updated fulfillment ${openFulfillment.id} to in_transit`, {});
+            } catch (fError: any) {
+                addLog('Error updating fulfillment', { error: fError.message });
+                throw fError; // Re-throw to be caught by outer catch
+            }
+        } else {
+            addLog('Warning: No open fulfillment found');
+            await logEvent('WARNING', 'No open fulfillment found to update', {});
+        }
+
+    } catch (opError: any) {
+        addLog('Operation Error', { message: opError.message });
+        await logEvent('ERROR', `Operation failed: ${opError.message}`, body);
+        return res.status(500).json({ message: 'Error processing order' });
     }
 
     res.status(200).json({ message: 'Success' });
   } catch (error: any) {
     console.error('Error processing webhook:', error);
-    // Try to log error if DB is accessible
-    // const { sql } = require('@vercel/postgres'); 
-    // ...
     res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 }
