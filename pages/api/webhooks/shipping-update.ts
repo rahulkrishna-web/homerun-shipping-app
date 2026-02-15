@@ -44,6 +44,12 @@ export default async function handler(
     };
 
     let orderId = body.id;
+    
+    // Handle nested payload from shipping provider
+    if (!orderId && body.data && body.data.order && body.data.order.id) {
+      orderId = body.data.order.id;
+    }
+
     // Handle 'fulfillment_events/create' or 'orders/updated' or custom shipping payload
     // If it's a custom payload, we need to know the structure.
     // Assuming standard Shopify payload or simple ID map for now.
