@@ -136,7 +136,7 @@ export default function Logs() {
                 content: 'Close',
                 onAction: () => setSelectedDebugLog(null),
               }}
-              large
+              size="large"
             >
               <Modal.Section>
                 <TextContainer>
