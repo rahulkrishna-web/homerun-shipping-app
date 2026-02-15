@@ -84,6 +84,7 @@ export default async function handler(
             const newTags = [...currentTags, specificTag].join(',');
             await shopify.order.update(orderId, { tags: newTags });
             addLog('Tag added', { tag: specificTag });
+            await logEvent('SUCCESS', `Added tag ${specificTag}`, body);
         } else {
             addLog('Tag already exists', { tag: specificTag });
         }
@@ -104,14 +105,14 @@ export default async function handler(
                 addLog('Attempting to create fulfillment event', { status: 'in_transit' });
                 await shopify.fulfillmentEvent.create(openFulfillment.id, { status: 'in_transit' });
                 addLog('Fulfillment event created successfully');
-                await logEvent('SUCCESS', `Updated fulfillment ${openFulfillment.id} to in_transit`, {});
+                await logEvent('SUCCESS', `Updated fulfillment ${openFulfillment.id} to in_transit`, body);
             } catch (fError: any) {
                 addLog('Error updating fulfillment', { error: fError.message });
                 throw fError; // Re-throw to be caught by outer catch
             }
         } else {
             addLog('Warning: No open fulfillment found');
-            await logEvent('WARNING', 'No open fulfillment found to update', {});
+            await logEvent('WARNING', 'No open fulfillment found to update', body);
         }
 
     } catch (opError: any) {
