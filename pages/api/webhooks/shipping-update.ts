@@ -32,6 +32,21 @@ export default async function handler(
 
     addLog('Webhook received', { topic, shop });
 
+    // Check if system is enabled
+    try {
+        const settingsResult = await sql`SELECT value FROM settings WHERE key = 'system_enabled';`;
+        const isEnabled = settingsResult.rows.length > 0 ? settingsResult.rows[0].value : true;
+        
+        if (!isEnabled) {
+            addLog('System Disabled', { message: 'Skipping processing' });
+            console.log('System is disabled. Skipping webhook.');
+            return res.status(200).json({ message: 'System disabled' });
+        }
+    } catch (sError) {
+        console.error('Error checking settings:', sError);
+        // Continue if settings check fails (fail open or closed? lets fail open for now)
+    }
+
     // DB Logger
     const logEvent = async (status: string, message: string, payload: any) => {
       try {

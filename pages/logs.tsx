@@ -33,8 +33,30 @@ export default function Logs() {
   const { data, error, mutate, isValidating } = useSWR(`/api/logs?page=${page}&limit=${limit}`, fetcher, {
     refreshInterval: 5000,
   });
+
+  const { data: settingsData, mutate: mutateSettings } = useSWR('/api/settings', fetcher);
+  const systemEnabled = settingsData?.enabled ?? true;
+
   const [selectedLog, setSelectedLog] = useState<Log | null>(null);
   const [selectedDebugLog, setSelectedDebugLog] = useState<Log | null>(null);
+  const [isToggling, setIsToggling] = useState(false);
+
+  const handleToggleSystem = async () => {
+    setIsToggling(true);
+    try {
+        const newState = !systemEnabled;
+        await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: newState }),
+        });
+        await mutateSettings();
+    } catch (e) {
+        console.error('Error toggling system:', e);
+    } finally {
+        setIsToggling(false);
+    }
+  };
 
   const logs: Log[] = data?.logs || [];
   const pagination = data?.pagination || { page: 1, limit: 50, total: 0, totalPages: 1 };
@@ -85,6 +107,7 @@ export default function Logs() {
       title="Webhook Logs"
       subtitle="Real-time logs of shipping updates"
       fullWidth
+      titleMetadata={<Badge tone={systemEnabled ? 'success' : 'critical'}>{systemEnabled ? 'System Enabled' : 'System Disabled'}</Badge>}
       primaryAction={
         <Button
           icon={RefreshIcon}
@@ -94,6 +117,15 @@ export default function Logs() {
           Refresh
         </Button>
       }
+      secondaryActions={[
+          {
+              content: systemEnabled ? 'Disable System' : 'Enable System',
+              destructive: systemEnabled,
+              onAction: handleToggleSystem,
+              loading: isToggling,
+              disabled: settingsData === undefined
+          }
+      ]}
     >
       <BlockStack gap="400">
         {error && (
