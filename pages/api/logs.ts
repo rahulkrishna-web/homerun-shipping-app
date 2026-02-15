@@ -20,14 +20,29 @@ export default async function handler(
       );
     `;
 
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = (page - 1) * limit;
+
+    const countResult = await sql`SELECT COUNT(*) FROM webhook_logs;`;
+    const total = parseInt(countResult.rows[0].count);
+
     const result = await sql`
       SELECT id, date, status, message, payload, flow_log
       FROM webhook_logs 
       ORDER BY date DESC 
-      LIMIT 50;
+      LIMIT ${limit} OFFSET ${offset};
     `;
     
-    res.status(200).json({ logs: result.rows });
+    res.status(200).json({ 
+      logs: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   } catch (error: any) {
     console.error('Database Error:', error);
     res.status(500).json({ error: error.message });

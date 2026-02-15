@@ -9,7 +9,8 @@ import {
   BlockStack,
   Banner,
   Modal,
-  TextContainer
+  TextContainer,
+  Pagination
 } from '@shopify/polaris';
 import { RefreshIcon } from '@shopify/polaris-icons';
 import { useState } from 'react';
@@ -26,15 +27,22 @@ type Log = {
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export default function Logs() {
-  const { data, error, mutate, isValidating } = useSWR('/api/logs', fetcher, {
+  const [page, setPage] = useState(1);
+  const limit = 50;
+  
+  const { data, error, mutate, isValidating } = useSWR(`/api/logs?page=${page}&limit=${limit}`, fetcher, {
     refreshInterval: 5000,
   });
   const [selectedLog, setSelectedLog] = useState<Log | null>(null);
   const [selectedDebugLog, setSelectedDebugLog] = useState<Log | null>(null);
 
   const logs: Log[] = data?.logs || [];
+  const pagination = data?.pagination || { page: 1, limit: 50, total: 0, totalPages: 1 };
+  const hasNext = page < pagination.totalPages;
+  const hasPrevious = page > 1;
 
   const rows = logs.map((log) => {
+    // ... (same as before) ...
     // Extract Order # and Amount safely
     const order = log?.payload?.data?.order || log?.payload?.order || {};
     const orderName = order.name || order.order_number || (log.payload?.id ? `ID: ${log.payload.id}` : '-');
@@ -99,8 +107,16 @@ export default function Logs() {
             columnContentTypes={['text', 'text', 'text', 'text', 'text', 'text']}
             headings={['Date', 'Order #', 'Amount', 'Status', 'Message', 'Actions']}
             rows={rows}
-            footerContent={`Showing ${logs.length} most recent logs`}
+            footerContent={`Showing ${logs.length} logs (Page ${page} of ${pagination.totalPages || 1})`}
           />
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '16px' }}>
+            <Pagination
+              hasPrevious={hasPrevious}
+              onPrevious={() => setPage(page - 1)}
+              hasNext={hasNext}
+              onNext={() => setPage(page + 1)}
+            />
+          </div>
         </LegacyCard>
 
         {selectedLog && (
