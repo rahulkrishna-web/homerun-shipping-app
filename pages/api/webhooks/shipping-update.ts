@@ -87,8 +87,8 @@ export default async function handler(
       // Let's use 'out_for_delivery' as it's more specific to the event.
       
       try {
-        await shopify.fulfillmentEvent.create(openFulfillment.id, { status: 'out_for_delivery' });
-        await logEvent('SUCCESS', `Updated fulfillment ${openFulfillment.id} to out_for_delivery`, {});
+        await shopify.fulfillmentEvent.create(openFulfillment.id, { status: 'in_transit' });
+        await logEvent('SUCCESS', `Updated fulfillment ${openFulfillment.id} to in_transit`, {});
       } catch (fError: any) {
          await logEvent('ERROR', `Failed to update fulfillment: ${fError.message}`, {});
          console.error('Fulfillment Update Error', fError);
