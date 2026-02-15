@@ -29,6 +29,7 @@ export default function Logs() {
   const { data, error, mutate, isValidating } = useSWR('/api/logs', fetcher, {
     refreshInterval: 5000,
   });
+  const [selectedLog, setSelectedLog] = useState<Log | null>(null);
   const [selectedDebugLog, setSelectedDebugLog] = useState<Log | null>(null);
 
   const logs: Log[] = data?.logs || [];
