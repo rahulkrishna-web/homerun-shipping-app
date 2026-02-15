@@ -7,8 +7,9 @@ import {
   Text,
   Button,
   BlockStack,
-  InlineStack,
-  Banner
+  Banner,
+  Modal,
+  TextContainer
 } from '@shopify/polaris';
 import { RefreshIcon } from '@shopify/polaris-icons';
 import { useState } from 'react';
@@ -25,36 +26,45 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export default function Logs() {
   const { data, error, mutate, isValidating } = useSWR('/api/logs', fetcher, {
-    refreshInterval: 5000, // Auto-refresh every 5 seconds
+    refreshInterval: 5000,
   });
+  const [selectedLog, setSelectedLog] = useState<Log | null>(null);
 
   const logs: Log[] = data?.logs || [];
 
-  const rows = logs.map((log) => [
-    new Date(log.date).toLocaleString(),
-    <Badge
-      key={log.id}
-      tone={
-        log.status === 'SUCCESS'
-          ? 'success'
-          : log.status === 'ERROR'
-          ? 'critical'
-          : log.status === 'WARNING'
-          ? 'warning'
-          : undefined
-      }
-    >
-      {log.status}
-    </Badge>,
-    <Text as="span" variant="bodyMd" key={`msg-${log.id}`}>
-      {log.message}
-    </Text>,
-    <div style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} key={`payload-${log.id}`}>
-       <Text as="span" variant="bodySm" tone="subdued">
-         {JSON.stringify(log.payload)}
-       </Text>
-    </div>
-  ]);
+  const rows = logs.map((log) => {
+    // Extract Order # and Amount safely
+    // Prioritize data.order structure, fallback to root or test payload
+    const order = log?.payload?.data?.order || log?.payload?.order || {};
+    const orderName = order.name || order.order_number || (log.payload?.id ? `ID: ${log.payload.id}` : '-');
+    const amount = order.current_total_price || order.total_price || '-';
+
+    return [
+      new Date(log.date).toLocaleString(),
+      <Text as="span" variant="bodyMd" key={`order-${log.id}`}>{orderName}</Text>,
+      <Text as="span" variant="bodyMd" key={`amount-${log.id}`}>{amount !== '-' ? `${order.currency || 'INR'} ${amount}` : '-'}</Text>,
+      <Badge
+        key={`status-${log.id}`}
+        tone={
+          log.status === 'SUCCESS'
+            ? 'success'
+            : log.status === 'ERROR'
+            ? 'critical'
+            : log.status === 'WARNING'
+            ? 'warning'
+            : undefined
+        }
+      >
+        {log.status}
+      </Badge>,
+      <Text as="span" variant="bodyMd" key={`msg-${log.id}`}>
+        {log.message}
+      </Text>,
+      <Button key={`btn-${log.id}`} onClick={() => setSelectedLog(log)} size="slim">
+        View Payload
+      </Button>
+    ];
+  });
 
   return (
     <Page
@@ -80,12 +90,37 @@ export default function Logs() {
         
         <LegacyCard>
           <DataTable
-            columnContentTypes={['text', 'text', 'text', 'text']}
-            headings={['Date', 'Status', 'Message', 'Payload']}
+            columnContentTypes={['text', 'text', 'text', 'text', 'text', 'text']}
+            headings={['Date', 'Order #', 'Amount', 'Status', 'Message', 'Payload']}
             rows={rows}
             footerContent={`Showing ${logs.length} most recent logs`}
           />
         </LegacyCard>
+
+        {selectedLog && (
+            <Modal
+              open={true}
+              onClose={() => setSelectedLog(null)}
+              title={`Payload for Log #${selectedLog.id}`}
+              primaryAction={{
+                content: 'Close',
+                onAction: () => setSelectedLog(null),
+              }}
+            >
+              <Modal.Section>
+                <TextContainer>
+                  <p><strong>Status:</strong> {selectedLog.status}</p>
+                  <p><strong>Message:</strong> {selectedLog.message}</p>
+                  <p><strong>Payload:</strong></p>
+                  <div style={{ maxHeight: '400px', overflow: 'auto', background: '#f6f6f6', padding: '10px', borderRadius: '4px' }}>
+                    <pre style={{ margin: 0 }}>
+                        {JSON.stringify(selectedLog.payload, null, 2)}
+                    </pre>
+                  </div>
+                </TextContainer>
+              </Modal.Section>
+            </Modal>
+        )}
       </BlockStack>
     </Page>
   );
