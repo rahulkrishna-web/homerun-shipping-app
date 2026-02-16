@@ -20,6 +20,14 @@ export default async function handler(
       );
     `;
 
+    // Ensure columns exist (for migration)
+    try {
+        await sql`ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS flow_log JSONB;`;
+        await sql`ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS summary JSONB;`;
+    } catch (e) {
+        console.log('Column migration error (ignorable if exists):', e);
+    }
+
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = (page - 1) * limit;
