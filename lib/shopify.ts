@@ -7,6 +7,7 @@ if (!process.env.SHOPIFY_SHOP_DOMAIN || !process.env.SHOPIFY_ACCESS_TOKEN) {
 const shopify = new Shopify({
   shopName: process.env.SHOPIFY_SHOP_DOMAIN,
   accessToken: process.env.SHOPIFY_ACCESS_TOKEN,
+  apiVersion: '2024-01',
 });
 
 export default shopify;

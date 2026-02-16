@@ -214,7 +214,7 @@ export default async function handler(
                     addLog('No legacy fulfillment found. Checking Fulfillment Orders (Strategy B)...');
                     try {
                         // @ts-ignore
-                        const fulfillmentOrders = await shopify.fulfillmentOrder.list(orderId);
+                        const fulfillmentOrders = await shopify.order.fulfillmentOrders(orderId);
                         
                         // Find an OPEN or IN_PROGRESS fulfillment order
                         const openFulfillmentOrder = fulfillmentOrders.find((fo: any) => 
