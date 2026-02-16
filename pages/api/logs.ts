@@ -28,7 +28,7 @@ export default async function handler(
     const total = parseInt(countResult.rows[0].count);
 
     const result = await sql`
-      SELECT id, date, status, message, payload, flow_log
+      SELECT id, date, status, message, payload, flow_log, summary
       FROM webhook_logs 
       ORDER BY date DESC 
       LIMIT ${limit} OFFSET ${offset};

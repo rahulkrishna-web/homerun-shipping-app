@@ -20,8 +20,16 @@ export default async function handler(
 
       result.rows.forEach(row => {
         if (row.key in settings) {
+            let val = row.value;
+            // Handle Type Conversion if DB returns strings for booleans
+            if (row.key.includes('enabled')) {
+               if (val === 'true' || val === true) val = true;
+               else if (val === 'false' || val === false) val = false;
+               else val = !!val; // Fallback
+            }
+            
             // @ts-ignore
-            settings[row.key] = row.value;
+            settings[row.key] = val;
         }
       });
 

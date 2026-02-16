@@ -61,6 +61,12 @@ export default async function handler(
         return res.status(200).json({ message: 'System disabled' });
     }
 
+    // Processing Summary
+    const processingSummary: any = {
+        tag: { status: 'skipped' },
+        fulfillment: { status: 'skipped', retries: 0 }
+    };
+
     // DB Logger
     const logEvent = async (status: string, message: string, payload: any) => {
       try {
@@ -71,12 +77,24 @@ export default async function handler(
             status VARCHAR(50),
             message TEXT,
             payload JSONB,
-            flow_log JSONB
+            flow_log JSONB,
+            summary JSONB
           );
         `;
+        // Ensure column exists (idempotent-ish via catch or explicit check, let's just allow it to fail silently if exists or use a separate migration step in real app. 
+        // For now, we'll just try to add it safely if we can, or rely on the INSERT to fail if column missing? 
+        // Better: alter table if not exists is hard in standard SQL without a function. 
+        // Let's just try to ADD COLUMN and ignore error, or assume it exists after this run.
+        try {
+            await sql`ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS summary JSONB;`;
+        } catch (e) {
+            // ignore if column exists or other non-critical error
+            console.log('Column add error (ignorable):', e);
+        }
+
         await sql`
-          INSERT INTO webhook_logs (status, message, payload, flow_log)
-          VALUES (${status}, ${message}, ${JSON.stringify(payload)}, ${JSON.stringify(flowLog)});
+          INSERT INTO webhook_logs (status, message, payload, flow_log, summary)
+          VALUES (${status}, ${message}, ${JSON.stringify(payload)}, ${JSON.stringify(flowLog)}, ${JSON.stringify(processingSummary)});
         `;
       } catch (dbError) {
         console.error('Database Error:', dbError);
@@ -110,15 +128,27 @@ export default async function handler(
             const specificTag = settings.tag_name;
             const currentTags = order.tags ? order.tags.split(',').map((t: string) => t.trim()) : [];
             
+            processingSummary.tag.tagName = specificTag;
+
             if (!currentTags.includes(specificTag)) {
-                const newTags = [...currentTags, specificTag].join(',');
-                await shopify.order.update(orderId, { tags: newTags });
-                addLog('Tag added', { tag: specificTag });
+                try {
+                    const newTags = [...currentTags, specificTag].join(',');
+                    await shopify.order.update(orderId, { tags: newTags });
+                    addLog('Tag added', { tag: specificTag });
+                    
+                    processingSummary.tag.status = 'success';
+                } catch (tagError: any) {
+                    processingSummary.tag.status = 'failed';
+                    processingSummary.tag.error = tagError.message;
+                    addLog('Error adding tag', { error: tagError.message });
+                }
             } else {
                 addLog('Tag already exists', { tag: specificTag });
+                processingSummary.tag.status = 'exists';
             }
         } else {
             addLog('Tagging skipped', { enabled: settings.tagging_enabled, tagName: settings.tag_name });
+            processingSummary.tag.status = 'skipped';
         }
 
         // 2. Update Fulfillment Status
@@ -126,6 +156,8 @@ export default async function handler(
             const desiredStatus = settings.fulfillment_status;
             let fulfillmentUpdated = false;
             
+            processingSummary.fulfillment.targetStatus = desiredStatus;
+
             // Retry logic: try 3 times to find an open fulfillment
             for (let attempt = 1; attempt <= 3; attempt++) {
                 addLog(`Fulfillment Update Attempt ${attempt}/3`);
@@ -168,15 +200,16 @@ export default async function handler(
                         await shopify.fulfillmentEvent.create(openFulfillment.id, { status: desiredStatus });
                         addLog('Fulfillment event created successfully');
                         
+                        processingSummary.fulfillment.status = 'success';
+                        processingSummary.fulfillment.retries = attempt - 1;
+
                         await logEvent('SUCCESS', `Processed Order ${orderId}`, body);
                         fulfillmentUpdated = true;
                         break; // Exit loop on success
                     } catch (fError: any) {
                         addLog('Error updating fulfillment', { error: fError.message });
-                        // If it fails to update, maybe it's complete? Or a real error?
-                        // We throw to exit the function or continue? 
-                        // If it's a hard error, maybe don't retry immediately? 
-                        // Let's assume hard error and break for now, or rethrow?
+                        processingSummary.fulfillment.status = 'failed';
+                        processingSummary.fulfillment.error = fError.message;
                         throw fError; 
                     }
                 } else {
@@ -185,17 +218,22 @@ export default async function handler(
                     if (attempt < 3) {
                          addLog('Waiting 3s before retry...');
                          await new Promise(resolve => setTimeout(resolve, 3000));
+                    } else {
+                         processingSummary.fulfillment.retries = 3;
                     }
                 }
             }
 
             if (!fulfillmentUpdated) {
                 addLog('Failed to update fulfillment after 3 attempts');
+                processingSummary.fulfillment.status = 'failed';
+                processingSummary.fulfillment.error = 'No open fulfillment found after 3 retries';
                 await logEvent('WARNING', `Fulfillment update skipped - no open fulfillment found after retries`, body);
             }
 
         } else {
             addLog('Fulfillment update skipped', { enabled: settings.fulfillment_update_enabled });
+            processingSummary.fulfillment.status = 'skipped';
             await logEvent('SUCCESS', `Processed Order ${orderId}`, body);
         }
 

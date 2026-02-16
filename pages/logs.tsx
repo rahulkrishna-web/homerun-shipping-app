@@ -16,7 +16,7 @@ import {
   Select,
   Checkbox
 } from '@shopify/polaris';
-import { RefreshIcon, SettingsIcon } from '@shopify/polaris-icons';
+import { RefreshIcon, SettingsIcon, AlertCircleIcon } from '@shopify/polaris-icons';
 import { useState, useEffect } from 'react';
 
 type Log = {
@@ -26,6 +26,10 @@ type Log = {
   message: string;
   payload: any;
   flow_log?: any[];
+  summary?: {
+      tag?: { status: string; tagName?: string; error?: string };
+      fulfillment?: { status: string; retries?: number; targetStatus?: string; error?: string };
+  };
 };
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
@@ -116,10 +120,56 @@ export default function Logs() {
     const orderName = order.name || order.order_number || (log.payload?.id ? `ID: ${log.payload.id}` : '-');
     const amount = order.current_total_price || order.total_price || '-';
 
+    // Tag Status Cell
+    let tagStatus = <Text as="span" tone="subdued">-</Text>;
+    if (log.summary?.tag) {
+        const { status, tagName, error } = log.summary.tag;
+        if (status === 'success') tagStatus = <Badge tone="success">{`Added: ${tagName || ''}`}</Badge>;
+        else if (status === 'exists') tagStatus = <Badge tone="info">{`Exists: ${tagName || ''}`}</Badge>;
+        else if (status === 'failed') tagStatus = <Badge tone="critical" progress="incomplete">Failed</Badge>;
+        else if (status === 'skipped') tagStatus = <Text as="span" tone="subdued">Skipped</Text>;
+    }
+
+    // Fulfillment Status Cell
+    let fulfillmentStatus = <Text as="span" tone="subdued">-</Text>;
+    if (log.summary?.fulfillment) {
+        const { status, retries, error, targetStatus } = log.summary.fulfillment;
+        let tone: 'success' | 'critical' | 'warning' | undefined = undefined;
+        let text = status;
+        
+        if (status === 'success') {
+            tone = 'success';
+            text = 'Updated';
+        } else if (status === 'failed') {
+            tone = 'critical';
+        } else if (status === 'skipped') {
+            text = 'Skipped';
+        }
+
+        fulfillmentStatus = (
+            <BlockStack key={`fulfillment-${log.id}`}>
+                 {status !== 'skipped' ? (
+                     <Badge tone={tone}>{text}</Badge>
+                 ) : (
+                     <Text as="span" tone="subdued">Skipped</Text>
+                 )}
+                 {retries !== undefined && retries > 0 && (
+                     <Text as="span" variant="bodyXs" tone="subdued">Retries: {retries}</Text>
+                 )}
+                 {error && (
+                     <div title={error} style={{ color: 'red', cursor: 'help' }}>
+                        <Text as="span" variant="bodyXs" tone="critical">Error details</Text>
+                     </div>
+                 )}
+            </BlockStack>
+        );
+    }
+
     return [
       new Date(log.date).toLocaleString(),
       <Text as="span" variant="bodyMd" key={`order-${log.id}`}>{orderName}</Text>,
-      <Text as="span" variant="bodyMd" key={`amount-${log.id}`}>{amount !== '-' ? `${order.currency || 'INR'} ${amount}` : '-'}</Text>,
+      tagStatus,
+      fulfillmentStatus,
       <Badge
         key={`status-${log.id}`}
         tone={
@@ -134,9 +184,6 @@ export default function Logs() {
       >
         {log.status}
       </Badge>,
-      <Text as="span" variant="bodyMd" key={`msg-${log.id}`}>
-        {log.message}
-      </Text>,
       <div key={`actions-${log.id}`} style={{ display: 'flex', gap: '8px' }}>
           <Button onClick={() => setSelectedLog(log)} size="slim">
             Payload
@@ -188,7 +235,7 @@ export default function Logs() {
         <LegacyCard>
           <DataTable
             columnContentTypes={['text', 'text', 'text', 'text', 'text', 'text']}
-            headings={['Date', 'Order #', 'Amount', 'Status', 'Message', 'Actions']}
+            headings={['Date', 'Order #', 'Tag Status', 'Fulfillment', 'Webhook Status', 'Actions']}
             rows={rows}
             footerContent={`Showing ${logs.length} logs (Page ${page} of ${pagination.totalPages || 1})`}
           />
