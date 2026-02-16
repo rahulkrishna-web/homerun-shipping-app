@@ -195,7 +195,8 @@ export default async function handler(
                     addLog('Found target legacy fulfillment', { id: openFulfillment.id, status: openFulfillment.status });
                     try {
                         addLog(`Creating fulfillment event: ${desiredStatus}`);
-                        await shopify.fulfillmentEvent.create(openFulfillment.id, { status: desiredStatus });
+                        // FIX: Pass orderId as the first argument
+                        await shopify.fulfillmentEvent.create(orderId, openFulfillment.id, { status: desiredStatus });
                         addLog('Fulfillment event created successfully');
                         
                         processingSummary.fulfillment.status = 'success';
@@ -206,8 +207,6 @@ export default async function handler(
                         break; // Exit loop on success
                     } catch (fError: any) {
                         addLog('Error updating fulfillment event', { error: fError.message });
-                        // If legacy fails, we don't try Strategy B on the same attempt, we circle back or fail?
-                        // Let's treat it as a retriable error.
                     }
                 } else {
                     // Strategy B: Check Fulfillment Orders (New / Local Delivery)
@@ -238,7 +237,6 @@ export default async function handler(
                             };
 
                             // If we want "In Transit" / "Out for Delivery", we need the fulfillment to be OPEN.
-                            // Providing tracking information (even placeholder) typically forces it to be OPEN.
                             if (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery') {
                                 // Extract tracking info robustly
                                 const trackingNumber = body.awb_no || body.data?.awb_no || body.tracking_number || body.data?.tracking_number || 'PENDING';
@@ -260,13 +258,14 @@ export default async function handler(
                             
                             addLog('Fulfillment created successfully (V2)', { id: newFulfillment.id, status: newFulfillment.status });
                             
-                            // Now apply the specific status event if needed (e.g. explicitly marking as 'out_for_delivery')
+                            // Now apply the specific status event
                             if (newFulfillment && newFulfillment.id && desiredStatus) {
                                 try {
-                                     await shopify.fulfillmentEvent.create(newFulfillment.id, { status: desiredStatus });
+                                     // FIX: Pass orderId as the first argument
+                                     await shopify.fulfillmentEvent.create(orderId, newFulfillment.id, { status: desiredStatus });
                                      addLog(`Applied status event: ${desiredStatus}`);
                                 } catch (eventErr: any) {
-                                     addLog(`Note: Could not apply status event (Action may be redundant)`, { error: eventErr.message });
+                                     addLog(`Error adding status event`, { error: eventErr.message });
                                 }
                             }
 
