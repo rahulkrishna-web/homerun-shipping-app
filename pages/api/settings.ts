@@ -52,11 +52,16 @@ export default async function handler(
 
       for (const update of updates) {
           if (update.value !== undefined) {
+            // Ensure value is valid JSON for JSONB column
+            // For strings, this adds quotes: "test" -> "\"test\""
+            // For booleans/numbers, it works as is: true -> "true"
+            const jsonValue = JSON.stringify(update.value);
+            
             await sql`
                 INSERT INTO settings (key, value)
-                VALUES (${update.key}, ${update.value})
+                VALUES (${update.key}, ${jsonValue}::jsonb)
                 ON CONFLICT (key) 
-                DO UPDATE SET value = ${update.value};
+                DO UPDATE SET value = ${jsonValue}::jsonb;
             `;
           }
       }
