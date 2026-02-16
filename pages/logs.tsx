@@ -10,10 +10,14 @@ import {
   Banner,
   Modal,
   TextContainer,
-  Pagination
+  Pagination,
+  FormLayout,
+  TextField,
+  Select,
+  Checkbox
 } from '@shopify/polaris';
-import { RefreshIcon } from '@shopify/polaris-icons';
-import { useState } from 'react';
+import { RefreshIcon, SettingsIcon } from '@shopify/polaris-icons';
+import { useState, useEffect } from 'react';
 
 type Log = {
   id: number;
@@ -40,15 +44,57 @@ export default function Logs() {
   const [selectedLog, setSelectedLog] = useState<Log | null>(null);
   const [selectedDebugLog, setSelectedDebugLog] = useState<Log | null>(null);
   const [isToggling, setIsToggling] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  // Settings Form State
+  const [settingsForm, setSettingsForm] = useState({
+      system_enabled: true,
+      tagging_enabled: false,
+      tag_name: '',
+      fulfillment_update_enabled: false,
+      fulfillment_status: 'in_transit'
+  });
+
+  useEffect(() => {
+      if (settingsData) {
+          setSettingsForm({
+              system_enabled: settingsData.system_enabled ?? true,
+              tagging_enabled: settingsData.tagging_enabled ?? false,
+              tag_name: settingsData.tag_name ?? '',
+              fulfillment_update_enabled: settingsData.fulfillment_update_enabled ?? false,
+              fulfillment_status: settingsData.fulfillment_status ?? 'in_transit'
+          });
+      }
+  }, [settingsData]);
+
+  const handleSaveSettings = async () => {
+      setIsSavingSettings(true);
+      try {
+          await fetch('/api/settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(settingsForm),
+          });
+          await mutateSettings();
+          setIsSettingsOpen(false);
+      } catch (e) {
+          console.error('Error saving settings:', e);
+      } finally {
+          setIsSavingSettings(false);
+      }
+  };
 
   const handleToggleSystem = async () => {
+    // Quick toggle for system enabled (legacy, keeping it synced)
     setIsToggling(true);
     try {
         const newState = !systemEnabled;
+        const newSettings = { ...settingsForm, system_enabled: newState };
         await fetch('/api/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: newState }),
+            body: JSON.stringify(newSettings),
         });
         await mutateSettings();
     } catch (e) {
@@ -118,6 +164,11 @@ export default function Logs() {
         </Button>
       }
       secondaryActions={[
+          {
+              content: 'Settings',
+              icon: SettingsIcon,
+              onAction: () => setIsSettingsOpen(true)
+          },
           {
               content: systemEnabled ? 'Disable System' : 'Enable System',
               destructive: systemEnabled,
@@ -205,6 +256,71 @@ export default function Logs() {
               </Modal.Section>
             </Modal>
         )}
+
+        <Modal
+            open={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            title="Configuration"
+            primaryAction={{
+                content: 'Save',
+                onAction: handleSaveSettings,
+                loading: isSavingSettings
+            }}
+            secondaryActions={[
+                {
+                    content: 'Cancel',
+                    onAction: () => setIsSettingsOpen(false)
+                }
+            ]}
+        >
+            <Modal.Section>
+                <FormLayout>
+                    <Checkbox
+                        label="Enable System"
+                        checked={settingsForm.system_enabled}
+                        onChange={(checked) => setSettingsForm(s => ({ ...s, system_enabled: checked }))}
+                        helpText="Master switch for the entire webhook processing."
+                    />
+                    
+                    <Text variant="headingMd" as="h3">Tagging</Text>
+                    <Checkbox
+                        label="Enable Order Tagging"
+                        checked={settingsForm.tagging_enabled}
+                        onChange={(checked) => setSettingsForm(s => ({ ...s, tagging_enabled: checked }))}
+                    />
+                    {settingsForm.tagging_enabled && (
+                        <TextField
+                            label="Tag Name"
+                            value={settingsForm.tag_name}
+                            onChange={(value) => setSettingsForm(s => ({ ...s, tag_name: value }))}
+                            autoComplete="off"
+                        />
+                    )}
+
+                    <Text variant="headingMd" as="h3">Fulfillment Status</Text>
+                    <Checkbox
+                        label="Update Fulfillment Status"
+                        checked={settingsForm.fulfillment_update_enabled}
+                        onChange={(checked) => setSettingsForm(s => ({ ...s, fulfillment_update_enabled: checked }))}
+                        helpText="Updates the status of an EXISTING open fulfillment."
+                    />
+                    {settingsForm.fulfillment_update_enabled && (
+                        <Select
+                            label="Target Status"
+                            options={[
+                                { label: 'In Transit', value: 'in_transit' },
+                                { label: 'Out for Delivery', value: 'out_for_delivery' },
+                                { label: 'Delivered', value: 'delivered' },
+                                { label: 'Failure', value: 'failure' },
+                                { label: 'Attempted Delivery', value: 'attempted_delivery' },
+                            ]}
+                            value={settingsForm.fulfillment_status}
+                            onChange={(value) => setSettingsForm(s => ({ ...s, fulfillment_status: value }))}
+                        />
+                    )}
+                </FormLayout>
+            </Modal.Section>
+        </Modal>
       </BlockStack>
     </Page>
   );
