@@ -170,7 +170,6 @@ export default async function handler(
                         currentOrder = await shopify.order.get(orderId, { fields: 'id,fulfillments' });
                     } catch (fetchErr: any) {
                         addLog('Error re-fetching order', { error: fetchErr.message });
-                        // Continue with previous data or abort? Let's continue but it's risky.
                     }
                 }
 
@@ -187,14 +186,13 @@ export default async function handler(
                     }))
                 });
 
-                // Filter for open fulfillments (success, open, processing are considered "active")
-                // Shopify Statuses: pending, open, success, cancelled, error, failure
+                // Strategy A: Check Legacy Fulfillments
                 const openFulfillment = fulfillments.find((f: any) => 
                     f.status === 'success' || f.status === 'open' || f.status === 'processing' || f.status === null
                 );
 
                 if (openFulfillment) {
-                    addLog('Found target fulfillment', { id: openFulfillment.id, status: openFulfillment.status });
+                    addLog('Found target legacy fulfillment', { id: openFulfillment.id, status: openFulfillment.status });
                     try {
                         addLog(`Creating fulfillment event: ${desiredStatus}`);
                         await shopify.fulfillmentEvent.create(openFulfillment.id, { status: desiredStatus });
@@ -207,14 +205,60 @@ export default async function handler(
                         fulfillmentUpdated = true;
                         break; // Exit loop on success
                     } catch (fError: any) {
-                        addLog('Error updating fulfillment', { error: fError.message });
-                        processingSummary.fulfillment.status = 'failed';
-                        processingSummary.fulfillment.error = fError.message;
-                        throw fError; 
+                        addLog('Error updating fulfillment event', { error: fError.message });
+                        // If legacy fails, we don't try Strategy B on the same attempt, we circle back or fail?
+                        // Let's treat it as a retriable error.
                     }
                 } else {
-                    addLog(`No open fulfillment found on attempt ${attempt}`);
-                    
+                    // Strategy B: Check Fulfillment Orders (New / Local Delivery)
+                    addLog('No legacy fulfillment found. Checking Fulfillment Orders (Strategy B)...');
+                    try {
+                        // @ts-ignore
+                        const fulfillmentOrders = await shopify.fulfillmentOrder.list(orderId);
+                        
+                        // Find an OPEN or IN_PROGRESS fulfillment order
+                        const openFulfillmentOrder = fulfillmentOrders.find((fo: any) => 
+                            fo.status === 'open' || fo.status === 'in_progress'
+                        );
+
+                        if (openFulfillmentOrder) {
+                            addLog('Found open Fulfillment Order', { 
+                                id: openFulfillmentOrder.id, 
+                                status: openFulfillmentOrder.status,
+                                delivery_method: openFulfillmentOrder.delivery_method ? openFulfillmentOrder.delivery_method.method_type : 'N/A'
+                            });
+
+                            // Create Fulfillment (V2)
+                            addLog(`Creating Fulfillment from Order (V2)`);
+                            
+                            const fulfillmentParams: any = {
+                                line_items_by_fulfillment_order: [
+                                    { fulfillment_order_id: openFulfillmentOrder.id }
+                                ]
+                            };
+
+                            // @ts-ignore
+                            await shopify.fulfillment.createV2(fulfillmentParams);
+                            
+                            addLog('Fulfillment created successfully (V2)');
+                            processingSummary.fulfillment.status = 'success';
+                            processingSummary.fulfillment.retries = attempt - 1;
+
+                            await logEvent('SUCCESS', `Processed Order ${orderId} (via FulfillmentOrder)`, body);
+                            fulfillmentUpdated = true;
+                            break; // Exit loop on success
+
+                        } else {
+                            addLog('No open Fulfillment Order found', { count: fulfillmentOrders.length });
+                        }
+
+                    } catch (foError: any) {
+                        // 403 or other errors
+                        addLog('Failed to check Fulfillment Orders', { error: foError.message });
+                    }
+                }
+
+                if (!fulfillmentUpdated) {
                     if (attempt < 3) {
                          addLog('Waiting 3s before retry...');
                          await new Promise(resolve => setTimeout(resolve, 3000));
