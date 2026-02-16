@@ -123,38 +123,77 @@ export default async function handler(
 
         // 2. Update Fulfillment Status
         if (settings.fulfillment_update_enabled && settings.fulfillment_status) {
-            const fulfillments = order.fulfillments || [];
-            // Filter for open fulfillments (success, open, processing are considered "active" for updates usually)
-            // Null status often means open/pending in some contexts, but Shopify usually has 'open'.
-            const openFulfillment = fulfillments.find((f: any) => 
-                f.status === 'success' || f.status === 'open' || f.status === 'processing' || f.status === null
-            ); 
+            const desiredStatus = settings.fulfillment_status;
+            let fulfillmentUpdated = false;
             
-            addLog('Searching for open fulfillment', { 
-                found: !!openFulfillment, 
-                fulfillmentId: openFulfillment?.id,
-                allFulfillments: fulfillments.map((f:any) => ({ id: f.id, status: f.status }))
-            });
-
-            if (openFulfillment) {
-                try {
-                    const targetStatus = settings.fulfillment_status;
-                    addLog('Attempting to create fulfillment event', { status: targetStatus });
-                    await shopify.fulfillmentEvent.create(openFulfillment.id, { status: targetStatus });
-                    addLog('Fulfillment event created successfully');
-                    
-                    // Final Success Log
-                    await logEvent('SUCCESS', `Processed Order ${orderId}`, body);
-                } catch (fError: any) {
-                    addLog('Error updating fulfillment', { error: fError.message });
-                    throw fError; 
+            // Retry logic: try 3 times to find an open fulfillment
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                addLog(`Fulfillment Update Attempt ${attempt}/3`);
+                
+                // Re-fetch order on subsequent attempts to get latest state
+                let currentOrder = order;
+                if (attempt > 1) {
+                    try {
+                        addLog('Re-fetching order from Shopify...');
+                        currentOrder = await shopify.order.get(orderId, { fields: 'id,fulfillments' });
+                    } catch (fetchErr: any) {
+                        addLog('Error re-fetching order', { error: fetchErr.message });
+                        // Continue with previous data or abort? Let's continue but it's risky.
+                    }
                 }
-            } else {
-                addLog('Warning: No open fulfillment found', { message: 'Skipping status update as per policy' });
-                // We still log SUCCESS for the overall webhook if tagging worked, or WARNING if only part worked?
-                // Let's log SUCCESS but note the skip in the message or keep it simple.
-                await logEvent('SUCCESS', `Processed (Fulfillment update skipped - no open fulfillment)`, body);
+
+                const fulfillments = currentOrder.fulfillments || [];
+                
+                // Detailed Logging of found fulfillments for debugging
+                addLog(`Scanning ${fulfillments.length} fulfillments`, { 
+                    fulfillments: fulfillments.map((f: any) => ({
+                        id: f.id,
+                        status: f.status,
+                        service: f.service,
+                        tracking_company: f.tracking_company,
+                        created_at: f.created_at
+                    }))
+                });
+
+                // Filter for open fulfillments (success, open, processing are considered "active")
+                // Shopify Statuses: pending, open, success, cancelled, error, failure
+                const openFulfillment = fulfillments.find((f: any) => 
+                    f.status === 'success' || f.status === 'open' || f.status === 'processing' || f.status === null
+                );
+
+                if (openFulfillment) {
+                    addLog('Found target fulfillment', { id: openFulfillment.id, status: openFulfillment.status });
+                    try {
+                        addLog(`Creating fulfillment event: ${desiredStatus}`);
+                        await shopify.fulfillmentEvent.create(openFulfillment.id, { status: desiredStatus });
+                        addLog('Fulfillment event created successfully');
+                        
+                        await logEvent('SUCCESS', `Processed Order ${orderId}`, body);
+                        fulfillmentUpdated = true;
+                        break; // Exit loop on success
+                    } catch (fError: any) {
+                        addLog('Error updating fulfillment', { error: fError.message });
+                        // If it fails to update, maybe it's complete? Or a real error?
+                        // We throw to exit the function or continue? 
+                        // If it's a hard error, maybe don't retry immediately? 
+                        // Let's assume hard error and break for now, or rethrow?
+                        throw fError; 
+                    }
+                } else {
+                    addLog(`No open fulfillment found on attempt ${attempt}`);
+                    
+                    if (attempt < 3) {
+                         addLog('Waiting 3s before retry...');
+                         await new Promise(resolve => setTimeout(resolve, 3000));
+                    }
+                }
             }
+
+            if (!fulfillmentUpdated) {
+                addLog('Failed to update fulfillment after 3 attempts');
+                await logEvent('WARNING', `Fulfillment update skipped - no open fulfillment found after retries`, body);
+            }
+
         } else {
             addLog('Fulfillment update skipped', { enabled: settings.fulfillment_update_enabled });
             await logEvent('SUCCESS', `Processed Order ${orderId}`, body);
