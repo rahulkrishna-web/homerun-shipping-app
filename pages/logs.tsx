@@ -16,8 +16,9 @@ import {
   Select,
   Checkbox
 } from '@shopify/polaris';
-import { RefreshIcon, SettingsIcon, AlertCircleIcon } from '@shopify/polaris-icons';
-import { useState, useEffect } from 'react';
+import { RefreshIcon, SettingsIcon, AlertCircleIcon, PlayIcon, ChevronDownIcon } from '@shopify/polaris-icons';
+import { useState, useEffect, useCallback } from 'react';
+import { Popover, ActionList } from '@shopify/polaris';
 
 type Log = {
   id: number;
@@ -53,6 +54,9 @@ export default function Logs() {
   const [forceOrder, setForceOrder] = useState<{ id: string, name: string } | null>(null);
   const [selectedForceStatus, setSelectedForceStatus] = useState('out_for_delivery');
   const [isForcing, setIsForcing] = useState(false);
+  const [activePopover, setActivePopover] = useState<number | null>(null);
+  const [manualForceModalOpen, setManualForceModalOpen] = useState(false);
+  const [manualForceId, setManualForceId] = useState('');
 
   // Settings Form State
   const [settingsForm, setSettingsForm] = useState({
@@ -113,22 +117,27 @@ export default function Logs() {
     }
   };
 
-  const handleForceStatus = async () => {
-    if (!forceOrder) return;
+  const handleForceStatus = async (orderId?: string, status?: string) => {
+    const targetId = orderId || forceOrder?.id;
+    const targetStatus = status || selectedForceStatus;
+    
+    if (!targetId) return;
     setIsForcing(true);
     try {
         const res = await fetch('/api/force-status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                orderId: forceOrder.id,
-                status: selectedForceStatus
+                orderId: targetId,
+                status: targetStatus
             })
         });
         const result = await res.json();
         if (res.ok) {
-            alert('Status updated successfully');
+            alert(`Status updated to ${targetStatus} successfully`);
             setForceOrder(null);
+            setManualForceModalOpen(false);
+            setManualForceId('');
             mutate();
         } else {
             alert(result.message || 'Failed to update status');
@@ -224,21 +233,43 @@ export default function Logs() {
           <Button onClick={() => setSelectedDebugLog(log)} size="slim" disabled={!log.flow_log}>
             Debug Log
           </Button>
-          <Button 
-            onClick={() => {
-                console.log('Force button clicked for order:', orderName, 'ID:', orderId);
-                if (orderId) {
-                    setForceOrder({ id: String(orderId), name: orderName });
-                } else {
-                    console.error('No order ID found for log', log.id);
-                    alert('No order ID found in this log payload.');
-                }
-            }} 
-            size="slim"
-            tone="critical"
+          <Popover
+            active={activePopover === log.id}
+            activator={
+              <Button 
+                onClick={() => setActivePopover(activePopover === log.id ? null : log.id)} 
+                size="slim"
+                tone="critical"
+                disclosure
+                icon={ChevronDownIcon}
+              >
+                Force
+              </Button>
+            }
+            onClose={() => setActivePopover(null)}
           >
-            Force
-          </Button>
+            <ActionList
+              actionRole="menuitem"
+              items={[
+                {
+                  content: 'Ready (Blue)',
+                  onAction: () => { handleForceStatus(String(orderId), 'ready_for_delivery'); setActivePopover(null); },
+                },
+                {
+                  content: 'Out for Delivery (Blue)',
+                  onAction: () => { handleForceStatus(String(orderId), 'out_for_delivery'); setActivePopover(null); },
+                },
+                {
+                  content: 'In Transit (Blue)',
+                  onAction: () => { handleForceStatus(String(orderId), 'in_transit'); setActivePopover(null); },
+                },
+                {
+                  content: 'Delivered (Grey)',
+                  onAction: () => { handleForceStatus(String(orderId), 'delivered'); setActivePopover(null); },
+                }
+              ]}
+            />
+          </Popover>
       </div>
     ];
   });
@@ -259,6 +290,11 @@ export default function Logs() {
         </Button>
       }
       secondaryActions={[
+          {
+              content: 'Force Order by Name/ID',
+              icon: PlayIcon,
+              onAction: () => setManualForceModalOpen(true)
+          },
           {
               content: 'Settings',
               icon: SettingsIcon,
@@ -352,43 +388,41 @@ export default function Logs() {
             </Modal>
         )}
 
-        {forceOrder && (
+        {manualForceModalOpen && (
             <Modal
                 open={true}
-                onClose={() => setForceOrder(null)}
-                title={`Force Status Change - ${forceOrder.name}`}
+                onClose={() => setManualForceModalOpen(false)}
+                title="Force Status - Manual"
                 primaryAction={{
                     content: 'Force Update',
-                    onAction: handleForceStatus,
+                    onAction: () => handleForceStatus(manualForceId),
                     loading: isForcing,
-                    destructive: true
+                    destructive: true,
+                    disabled: !manualForceId
                 }}
-                secondaryActions={[
-                    {
-                        content: 'Cancel',
-                        onAction: () => setForceOrder(null),
-                    },
-                ]}
             >
                 <Modal.Section>
-                    <BlockStack gap="400">
-                        <Text as="p">
-                            This will manually trigger a fulfillment update in Shopify for order <strong>{forceOrder.name}</strong>.
-                            It will attempt to create a fulfillment if none exists, or update an existing one.
-                        </Text>
+                    <FormLayout>
+                        <TextField
+                            label="Order Number or ID"
+                            value={manualForceId}
+                            onChange={(v) => setManualForceId(v)}
+                            placeholder="e.g. HR/25/53871 or 7098661175611"
+                            autoComplete="off"
+                            helpText="Enter the order name (with HR/ prefix) or numeric Shopify ID."
+                        />
                         <Select
                             label="Target Status"
                             options={[
                                 { label: 'Prepare for Delivery (Blue Badge)', value: 'ready_for_delivery' },
                                 { label: 'Out for Delivery (Blue Badge)', value: 'out_for_delivery' },
                                 { label: 'In Transit (Blue Badge)', value: 'in_transit' },
-                                { label: 'Delivered (Grey Badge)', value: 'delivered' },
-                                { label: 'Fulfilled (Grey Badge)', value: 'fulfilled' }
+                                { label: 'Delivered (Grey Badge)', value: 'delivered' }
                             ]}
-                            onChange={(value) => setSelectedForceStatus(value)}
+                            onChange={(v) => setSelectedForceStatus(v)}
                             value={selectedForceStatus}
                         />
-                    </BlockStack>
+                    </FormLayout>
                 </Modal.Section>
             </Modal>
         )}

@@ -67,14 +67,15 @@ export default async function handler(
             addLog('Found Fulfillment Order to mark', { id: openFO.id, currentStatus: openFO.status });
             
             const endpoint = desiredStatus === 'out_for_delivery' ? 'mark_as_out_for_delivery' : 'mark_as_ready_for_delivery';
-            const url = `https://${process.env.SHOPIFY_SHOP_DOMAIN}/admin/api/2024-01/fulfillment_orders/${openFO.id}/${endpoint}.json`;
+            const url = `https://${process.env.SHOPIFY_SHOP_DOMAIN}/admin/api/2024-10/fulfillment_orders/${openFO.id}/${endpoint}.json`;
             
             addLog(`Calling REST: ${url}`);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN || '',
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
                 }
             });
 
