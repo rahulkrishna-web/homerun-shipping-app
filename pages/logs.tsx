@@ -226,8 +226,9 @@ export default function Logs() {
           </Button>
           <Button 
             onClick={() => {
+                console.log('Force button clicked for order:', orderName, 'ID:', orderId);
                 if (orderId) {
-                    setForceOrder({ id: orderId, name: orderName });
+                    setForceOrder({ id: String(orderId), name: orderName });
                 } else {
                     console.error('No order ID found for log', log.id);
                     alert('No order ID found in this log payload.');
@@ -348,6 +349,46 @@ export default function Logs() {
                    />
                 </TextContainer>
               </Modal.Section>
+            </Modal>
+        )}
+
+        {forceOrder && (
+            <Modal
+                open={true}
+                onClose={() => setForceOrder(null)}
+                title={`Force Status Change - ${forceOrder.name}`}
+                primaryAction={{
+                    content: 'Force Update',
+                    onAction: handleForceStatus,
+                    loading: isForcing,
+                    destructive: true
+                }}
+                secondaryActions={[
+                    {
+                        content: 'Cancel',
+                        onAction: () => setForceOrder(null),
+                    },
+                ]}
+            >
+                <Modal.Section>
+                    <BlockStack gap="400">
+                        <Text as="p">
+                            This will manually trigger a fulfillment update in Shopify for order <strong>{forceOrder.name}</strong>.
+                            It will attempt to create a fulfillment if none exists, or update an existing one.
+                        </Text>
+                        <Select
+                            label="Target Status"
+                            options={[
+                                { label: 'Out for Delivery (Blue Badge)', value: 'out_for_delivery' },
+                                { label: 'In Transit (Blue Badge)', value: 'in_transit' },
+                                { label: 'Delivered (Grey Badge)', value: 'delivered' },
+                                { label: 'Fulfilled (Grey Badge)', value: 'fulfilled' }
+                            ]}
+                            onChange={(value) => setSelectedForceStatus(value)}
+                            value={selectedForceStatus}
+                        />
+                    </BlockStack>
+                </Modal.Section>
             </Modal>
         )}
 
