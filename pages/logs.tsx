@@ -50,6 +50,9 @@ export default function Logs() {
   const [isToggling, setIsToggling] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [forceOrder, setForceOrder] = useState<{ id: string, name: string } | null>(null);
+  const [selectedForceStatus, setSelectedForceStatus] = useState('out_for_delivery');
+  const [isForcing, setIsForcing] = useState(false);
 
   // Settings Form State
   const [settingsForm, setSettingsForm] = useState({
@@ -107,6 +110,33 @@ export default function Logs() {
         console.error('Error toggling system:', e);
     } finally {
         setIsToggling(false);
+    }
+  };
+
+  const handleForceStatus = async () => {
+    if (!forceOrder) return;
+    setIsForcing(true);
+    try {
+        const res = await fetch('/api/force-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                orderId: forceOrder.id,
+                status: selectedForceStatus
+            })
+        });
+        const result = await res.json();
+        if (res.ok) {
+            alert('Status updated successfully');
+            setForceOrder(null);
+            mutate();
+        } else {
+            alert(result.message || 'Failed to update status');
+        }
+    } catch (e) {
+        alert('Error updating status');
+    } finally {
+        setIsForcing(false);
     }
   };
 
@@ -192,6 +222,16 @@ export default function Logs() {
           </Button>
           <Button onClick={() => setSelectedDebugLog(log)} size="slim" disabled={!log.flow_log}>
             Debug Log
+          </Button>
+          <Button 
+            onClick={() => {
+                const id = order.id || log.payload?.id;
+                if (id) setForceOrder({ id, name: orderName });
+            }} 
+            size="slim"
+            tone="critical"
+          >
+            Force
           </Button>
       </div>
     ];

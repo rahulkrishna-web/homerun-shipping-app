@@ -1,0 +1,132 @@
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { sql } from '@vercel/postgres';
+import shopify from '../../lib/shopify';
+
+/**
+ * API to manually force a fulfillment status update for a specific order.
+ * This reuses the logic from 'shipping-update.ts' but is triggered manually from the UI.
+ */
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method not allowed' });
+  }
+
+  const { orderId, status, trackingNumber, trackingCompany } = req.body;
+
+  if (!orderId || !status) {
+    return res.status(400).json({ message: 'Missing orderId or status' });
+  }
+
+  const desiredStatus = status; // in_transit, out_for_delivery, delivered
+  const flowLog: any[] = [];
+  const addLog = (step: string, detail: any = null) => {
+    const entry = { timestamp: new Date().toISOString(), step, detail };
+    console.log(`[Force] ${step}`, detail ? JSON.stringify(detail) : '');
+    flowLog.push(entry);
+  };
+
+  try {
+    addLog('Manual Force Request Received', { orderId, status });
+
+    // 1. Fetch Order and Fulfillments
+    let order;
+    try {
+        order = await shopify.order.get(orderId, { fields: 'id,name,fulfillments,tags' });
+    } catch (e: any) {
+        return res.status(404).json({ message: `Order ${orderId} not found` });
+    }
+
+    const fulfillments = order.fulfillments || [];
+    addLog('Order Fetched', { name: order.name, fulfillmentCount: fulfillments.length });
+
+    // Strategy A: Update existing fulfillment
+    const openFulfillment = fulfillments.find((f: any) => 
+        f.status === 'success' || f.status === 'open' || f.status === 'processing'
+    );
+
+    if (openFulfillment) {
+        addLog('Updating existing legacy fulfillment', { id: openFulfillment.id, status: openFulfillment.status });
+        
+        // If we want it to be BLUE, try calling 'open' first if it's currently 'success'
+        if (openFulfillment.status === 'success' && (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery')) {
+            try {
+                addLog('Attempting to re-open fulfillment');
+                await shopify.fulfillment.open(orderId, openFulfillment.id);
+                addLog('Fulfillment re-opened');
+            } catch (e: any) {
+                addLog('Re-open failed (already open or not supported)', { error: e.message });
+            }
+        }
+
+        addLog(`Creating fulfillment event: ${desiredStatus}`);
+        await shopify.fulfillmentEvent.create(orderId, openFulfillment.id, { status: desiredStatus });
+        addLog('Fulfillment event created successfully');
+    } else {
+        // Strategy B: Create fulfillment from Fulfillment Order
+        addLog('No active fulfillment found. Checking Fulfillment Orders...');
+        // @ts-ignore
+        const fulfillmentOrders = await shopify.order.fulfillmentOrders(orderId);
+        const openFO = fulfillmentOrders.find((fo: any) => fo.status === 'open' || fo.status === 'in_progress');
+
+        if (openFO) {
+            addLog('Found open Fulfillment Order', { id: openFO.id });
+            const params: any = {
+                line_items_by_fulfillment_order: [{ fulfillment_order_id: openFO.id }]
+            };
+
+            if (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery') {
+                params.tracking_info = {
+                    number: trackingNumber || 'MANUAL-FORCE',
+                    company: trackingCompany || 'Local Delivery'
+                };
+                params.status = 'open';
+            }
+
+            // @ts-ignore
+            const newF = await shopify.fulfillment.createV2(params);
+            addLog('Fulfillment created (V2)', { id: newF.id, status: newF.status });
+
+            // Explicitly open if it defaulted to success
+            if (newF.status === 'success' && (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery')) {
+                try {
+                    await shopify.fulfillment.open(orderId, newF.id);
+                    addLog('Fulfillment explicitly opened');
+                } catch (e) {}
+            }
+
+            // Small delay for Shopify to catch up
+            await new Promise(r => setTimeout(r, 1000));
+            await shopify.fulfillmentEvent.create(orderId, newF.id, { status: desiredStatus });
+            addLog('Fulfillment event created');
+        } else {
+            addLog('No open fulfillment orders found. Cannot force status change.');
+            return res.status(400).json({ message: 'No open fulfillment orders found' });
+        }
+    }
+
+    // Log the manual action in the DB
+    const summary = {
+        manual: true,
+        fulfillment: { status: 'success', targetStatus: desiredStatus }
+    };
+
+    await sql`
+      INSERT INTO webhook_logs (status, message, payload, flow_log, summary)
+      VALUES (
+        'SUCCESS',
+        ${`Manually forced status: ${desiredStatus} for Order ${orderId}`},
+        ${JSON.stringify({ manual: true, orderId, status })},
+        ${JSON.stringify(flowLog)},
+        ${JSON.stringify(summary)}
+      );
+    `;
+
+    return res.status(200).json({ message: 'Status updated successfully', flowLog });
+  } catch (error: any) {
+    addLog('FATAL ERROR', { message: error.message });
+    return res.status(500).json({ message: error.message, flowLog });
+  }
+}
