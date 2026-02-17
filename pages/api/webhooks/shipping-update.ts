@@ -230,51 +230,54 @@ export default async function handler(
                                 delivery_method: openFulfillmentOrder.delivery_method ? openFulfillmentOrder.delivery_method.method_type : 'N/A'
                             });
 
-                            // Create Fulfillment (V2)
-                            addLog(`Creating Fulfillment from Order (V2)`);
-                            
-                            const fulfillmentParams: any = {
-                                line_items_by_fulfillment_order: [
-                                    { fulfillment_order_id: openFulfillmentOrder.id }
-                                ]
-                            };
-
-                            // If we want "In Transit" / "Out for Delivery", we need the fulfillment to be OPEN.
+                            // If we want "In Transit" / "Out for Delivery", we only mark as ready to keep badge BLUE.
                             if (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery') {
-                                // NEW: Force the FulfillmentOrder into "IN_PROGRESS" state (Blue Badge)
+                                // Force the FulfillmentOrder into "IN_PROGRESS" state (Blue Badge)
                                 try {
                                     const markUrl = `/fulfillment_orders/${openFulfillmentOrder.id}/mark_as_ready_for_delivery.json`;
                                     // @ts-ignore
                                     await shopify.request(markUrl, 'POST');
                                     addLog('Marked FulfillmentOrder as Ready for Delivery (Blue Badge)');
+                                    
+                                    await logEvent('SUCCESS', `Processed Order ${orderId} (Blue Badge)`, body);
+                                    fulfillmentUpdated = true;
+                                    break; // Successfully handled without fulfilling
                                 } catch (e: any) {
                                     addLog('Failed to mark as ready for delivery', { error: e.message });
+                                    // Fall through to fulfillment if marking failed? 
+                                    // Actually, let's just break and count it as a retry if it's critical.
+                                    // But if we can't mark it, we might want to try fulfilling.
+                                    // For now, let's treat it as a success if the user wants blue.
                                 }
+                            }
 
-                                // Extraction of tracking info
-                                const trackingNumber = body.awb_no || body.data?.awb_no || body.tracking_number || body.data?.tracking_number || 'PENDING';
-                                const trackingCompany = body.tracking_company || body.data?.tracking_company || 'Local Delivery';
-                                const trackingUrl = body.tracking_url || body.data?.tracking_url;
+                            // Create Fulfillment (V2) - Only for terminal statuses like 'delivered'
+                            addLog(`Creating Fulfillment from Order (V2)`);
+                            
+                            const fulfillmentParams: any = {
+                                line_items_by_fulfillment_order: [
+                                    { fulfillment_order_id: openFulfillmentOrder.id }
+                                ],
+                                notify_customer: true,
+                                status: (desiredStatus === 'delivered' || desiredStatus === 'failure') ? 'success' : 'open'
+                            };
 
+                            // Extraction of tracking info
+                            const trackingNumber = body.awb_no || body.data?.awb_no || body.tracking_number || body.data?.tracking_number;
+                            const trackingCompany = body.tracking_company || body.data?.tracking_company || 'Local Delivery';
+                            const trackingUrl = body.tracking_url || body.data?.tracking_url;
+
+                            if (trackingNumber) {
                                 fulfillmentParams.tracking_info = {
                                     number: trackingNumber,
                                     company: trackingCompany
                                 };
                                 if (trackingUrl) fulfillmentParams.tracking_info.url = trackingUrl;
-                                
-                                fulfillmentParams.notify_customer = true; 
-                                
-                                // NEW: Set status to 'open' so it shows as Blue "Out for delivery" in the list view,
-                                // instead of the default 'success' which shows as Grey "Fulfilled".
-                                fulfillmentParams.status = 'open';
-                                
-                                addLog('Extracted tracking info and set status to open', { trackingNumber, trackingCompany });
                             }
 
                             // @ts-ignore
                             const newFulfillment = await shopify.fulfillment.createV2(fulfillmentParams);
-                            
-                            addLog('Fulfillment created successfully (V2)', { id: newFulfillment.id, status: newFulfillment.status });
+                            addLog('Fulfillment created successfully (V2)', { id: newFulfillment.id });
                             
                             // Now apply the specific status event
                             if (newFulfillment && newFulfillment.id && (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery')) {

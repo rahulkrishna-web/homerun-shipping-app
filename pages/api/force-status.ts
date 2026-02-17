@@ -55,9 +55,10 @@ export default async function handler(
     const fulfillments = order.fulfillments || [];
     addLog('Order Fetched', { name: order.name, fulfillmentCount: fulfillments.length });
 
-    // Strategy 0: Mark as Ready for Delivery (Specifically for Blue Badge without fulfilling)
-    if (desiredStatus === 'ready_for_delivery') {
-        addLog('Action: Mark as Ready for Delivery requested');
+    // Strategy 0: Mark as Ready for Delivery (Blue Badge)
+    // We avoid creating a fulfillment Record for these states because it turns the badge Grey.
+    if (desiredStatus === 'ready_for_delivery' || desiredStatus === 'out_for_delivery' || desiredStatus === 'in_transit') {
+        addLog(`Action: Mark as Ready for Delivery requested for status: ${desiredStatus}`);
         // @ts-ignore
         const fos = await shopify.order.fulfillmentOrders(orderNumericId);
         const openFO = fos.find((fo: any) => fo.status === 'open');
@@ -71,10 +72,16 @@ export default async function handler(
             // Log to DB
             await sql`
               INSERT INTO webhook_logs (status, message, payload, flow_log, summary)
-              VALUES ('SUCCESS', ${`Manually prepared for delivery: Order ${orderNumericId}`}, ${JSON.stringify({ manual: true, orderId, status })}, ${JSON.stringify(flowLog)}, ${JSON.stringify({ manual: true, badge: 'blue' })});
+              VALUES ('SUCCESS', ${`Manually prepared for ${desiredStatus}: Order ${orderNumericId}`}, ${JSON.stringify({ manual: true, orderId, status })}, ${JSON.stringify(flowLog)}, ${JSON.stringify({ manual: true, badge: 'blue' })});
             `;
-            return res.status(200).json({ message: 'Marked as ready for delivery (Blue Badge)', flowLog });
+            return res.status(200).json({ message: `Marked as ${desiredStatus} (Blue Badge)`, flowLog });
         } else {
+            // If it's already in progress, we've succeeded
+            const inProgressFO = fos.find((fo: any) => fo.status === 'in_progress');
+            if (inProgressFO) {
+                addLog('Order is already in progress (Blue Badge).');
+                return res.status(200).json({ message: 'Order is already in progress (Blue Badge)', flowLog });
+            }
             addLog('No open fulfillment order found for this action');
             return res.status(400).json({ message: 'No OPEN fulfillment order found to mark as ready.', flowLog });
         }
