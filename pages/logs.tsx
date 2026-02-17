@@ -379,6 +379,7 @@ export default function Logs() {
                         <Select
                             label="Target Status"
                             options={[
+                                { label: 'Prepare for Delivery (Blue Badge)', value: 'ready_for_delivery' },
                                 { label: 'Out for Delivery (Blue Badge)', value: 'out_for_delivery' },
                                 { label: 'In Transit (Blue Badge)', value: 'in_transit' },
                                 { label: 'Delivered (Grey Badge)', value: 'delivered' },

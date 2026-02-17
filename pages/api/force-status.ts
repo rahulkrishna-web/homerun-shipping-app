@@ -55,6 +55,31 @@ export default async function handler(
     const fulfillments = order.fulfillments || [];
     addLog('Order Fetched', { name: order.name, fulfillmentCount: fulfillments.length });
 
+    // Strategy 0: Mark as Ready for Delivery (Specifically for Blue Badge without fulfilling)
+    if (desiredStatus === 'ready_for_delivery') {
+        addLog('Action: Mark as Ready for Delivery requested');
+        // @ts-ignore
+        const fos = await shopify.order.fulfillmentOrders(orderNumericId);
+        const openFO = fos.find((fo: any) => fo.status === 'open');
+        if (openFO) {
+            addLog('Found open Fulfillment Order to mark', { id: openFO.id });
+            const url = `/fulfillment_orders/${openFO.id}/mark_as_ready_for_delivery.json`;
+            // @ts-ignore
+            await shopify.request(url, 'POST');
+            addLog('Successfully marked as ready for delivery (REST)');
+            
+            // Log to DB
+            await sql`
+              INSERT INTO webhook_logs (status, message, payload, flow_log, summary)
+              VALUES ('SUCCESS', ${`Manually prepared for delivery: Order ${orderNumericId}`}, ${JSON.stringify({ manual: true, orderId, status })}, ${JSON.stringify(flowLog)}, ${JSON.stringify({ manual: true, badge: 'blue' })});
+            `;
+            return res.status(200).json({ message: 'Marked as ready for delivery (Blue Badge)', flowLog });
+        } else {
+            addLog('No open fulfillment order found for this action');
+            return res.status(400).json({ message: 'No OPEN fulfillment order found to mark as ready.', flowLog });
+        }
+    }
+
     // Strategy A: Update existing fulfillment
     const openFulfillment = fulfillments.find((f: any) => 
         f.status === 'success' || f.status === 'open' || f.status === 'processing'
