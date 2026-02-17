@@ -267,9 +267,18 @@ export default async function handler(
                             addLog('Fulfillment created successfully (V2)', { id: newFulfillment.id, status: newFulfillment.status });
                             
                             // Now apply the specific status event
-                            if (newFulfillment && newFulfillment.id && desiredStatus) {
+                            if (newFulfillment && newFulfillment.id && (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery')) {
                                 try {
-                                     // FIX: Pass orderId as the first argument
+                                    addLog('Attempting to explicitly move fulfillment to OPEN state');
+                                    await shopify.fulfillment.open(orderId, newFulfillment.id);
+                                    addLog('Fulfillment explicitly opened');
+                                } catch (err: any) {
+                                    addLog('Failed to explicitly open fulfillment (Expected for some setups)', { error: err.message });
+                                }
+
+                                try {
+                                     // Small delay to let Shopify register the state
+                                     await new Promise(resolve => setTimeout(resolve, 2000));
                                      await shopify.fulfillmentEvent.create(orderId, newFulfillment.id, { status: desiredStatus });
                                      addLog(`Applied status event: ${desiredStatus}`);
                                 } catch (eventErr: any) {
