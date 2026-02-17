@@ -234,12 +234,13 @@ export default async function handler(
                             if (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery') {
                                 // Force the FulfillmentOrder into "IN_PROGRESS" state (Blue Badge)
                                 try {
-                                    const markUrl = `/fulfillment_orders/${openFulfillmentOrder.id}/mark_as_ready_for_delivery.json`;
+                                    const endpoint = desiredStatus === 'out_for_delivery' ? 'mark_as_out_for_delivery' : 'mark_as_ready_for_delivery';
+                                    const markUrl = `/fulfillment_orders/${openFulfillmentOrder.id}/${endpoint}.json`;
                                     // @ts-ignore
                                     await shopify.request(markUrl, 'POST');
-                                    addLog('Marked FulfillmentOrder as Ready for Delivery (Blue Badge)');
+                                    addLog(`Marked FulfillmentOrder as ${desiredStatus} (Blue Badge)`);
                                     
-                                    await logEvent('SUCCESS', `Processed Order ${orderId} (Blue Badge)`, body);
+                                    await logEvent('SUCCESS', `Processed Order ${orderId} (Blue Badge: ${desiredStatus})`, body);
                                     fulfillmentUpdated = true;
                                     break; // Successfully handled without fulfilling
                                 } catch (e: any) {

@@ -55,35 +55,35 @@ export default async function handler(
     const fulfillments = order.fulfillments || [];
     addLog('Order Fetched', { name: order.name, fulfillmentCount: fulfillments.length });
 
-    // Strategy 0: Mark as Ready for Delivery (Blue Badge)
+    // Strategy 0: Mark as Ready/Out for Delivery (Blue Badge)
     // We avoid creating a fulfillment Record for these states because it turns the badge Grey.
     if (desiredStatus === 'ready_for_delivery' || desiredStatus === 'out_for_delivery' || desiredStatus === 'in_transit') {
-        addLog(`Action: Mark as Ready for Delivery requested for status: ${desiredStatus}`);
+        addLog(`Action: Mark as Ready/Out for Delivery requested for status: ${desiredStatus}`);
         // @ts-ignore
         const fos = await shopify.order.fulfillmentOrders(orderNumericId);
-        const openFO = fos.find((fo: any) => fo.status === 'open');
+        const openFO = fos.find((fo: any) => fo.status === 'open' || fo.status === 'in_progress');
+        
         if (openFO) {
-            addLog('Found open Fulfillment Order to mark', { id: openFO.id });
-            const url = `/fulfillment_orders/${openFO.id}/mark_as_ready_for_delivery.json`;
+            addLog('Found Fulfillment Order to mark', { id: openFO.id, currentStatus: openFO.status });
+            
+            // For "Out for Delivery", we use the specific endpoint.
+            // For others (Ready, In Transit), we use "Ready for Delivery" as the base Blue state.
+            const endpoint = desiredStatus === 'out_for_delivery' ? 'mark_as_out_for_delivery' : 'mark_as_ready_for_delivery';
+            const url = `/fulfillment_orders/${openFO.id}/${endpoint}.json`;
+            
             // @ts-ignore
             await shopify.request(url, 'POST');
-            addLog('Successfully marked as ready for delivery (REST)');
+            addLog(`Successfully marked as ${endpoint} (REST)`);
             
             // Log to DB
             await sql`
               INSERT INTO webhook_logs (status, message, payload, flow_log, summary)
-              VALUES ('SUCCESS', ${`Manually prepared for ${desiredStatus}: Order ${orderNumericId}`}, ${JSON.stringify({ manual: true, orderId, status })}, ${JSON.stringify(flowLog)}, ${JSON.stringify({ manual: true, badge: 'blue' })});
+              VALUES ('SUCCESS', ${`Manually set ${desiredStatus}: Order ${orderNumericId}`}, ${JSON.stringify({ manual: true, orderId, status })}, ${JSON.stringify(flowLog)}, ${JSON.stringify({ manual: true, badge: 'blue' })});
             `;
             return res.status(200).json({ message: `Marked as ${desiredStatus} (Blue Badge)`, flowLog });
         } else {
-            // If it's already in progress, we've succeeded
-            const inProgressFO = fos.find((fo: any) => fo.status === 'in_progress');
-            if (inProgressFO) {
-                addLog('Order is already in progress (Blue Badge).');
-                return res.status(200).json({ message: 'Order is already in progress (Blue Badge)', flowLog });
-            }
-            addLog('No open fulfillment order found for this action');
-            return res.status(400).json({ message: 'No OPEN fulfillment order found to mark as ready.', flowLog });
+            addLog('No open/in-progress fulfillment order found for this action');
+            return res.status(400).json({ message: 'No OPEN fulfillment order found.', flowLog });
         }
     }
 
