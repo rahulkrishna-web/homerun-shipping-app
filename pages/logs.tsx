@@ -148,8 +148,9 @@ export default function Logs() {
   const rows = logs.map((log) => {
     // ... (same as before) ...
     // Extract Order # and Amount safely
-    const order = log?.payload?.data?.order || log?.payload?.order || {};
-    const orderName = order.name || order.order_number || (log.payload?.id ? `ID: ${log.payload.id}` : '-');
+    const order = log?.payload?.data?.order || log?.payload?.order || log?.payload?.data || log?.payload || {};
+    const orderId = order.id || log.payload?.id || order.order_id;
+    const orderName = order.name || order.order_number || (orderId ? `ID: ${orderId}` : '-');
     const amount = order.current_total_price || order.total_price || '-';
 
     // Tag Status Cell
@@ -225,8 +226,12 @@ export default function Logs() {
           </Button>
           <Button 
             onClick={() => {
-                const id = order.id || log.payload?.id;
-                if (id) setForceOrder({ id, name: orderName });
+                if (orderId) {
+                    setForceOrder({ id: orderId, name: orderName });
+                } else {
+                    console.error('No order ID found for log', log.id);
+                    alert('No order ID found in this log payload.');
+                }
             }} 
             size="slim"
             tone="critical"
