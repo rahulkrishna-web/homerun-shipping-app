@@ -81,7 +81,14 @@ export default async function handler(
             if (!response.ok) {
                 const errorText = await response.text();
                 addLog('REST call failed', { status: response.status, error: errorText });
-                return res.status(response.status).json({ message: `REST call failed: ${errorText}`, flowLog });
+                
+                // Log failure to DB too
+                await sql`
+                  INSERT INTO webhook_logs (status, message, payload, flow_log, summary)
+                  VALUES ('ERROR', ${`Manual set ${desiredStatus} FAILED (Status ${response.status})`}, ${JSON.stringify({ manual: true, orderId, status, error: errorText })}, ${JSON.stringify(flowLog)}, ${JSON.stringify({ manual: true, error: true })});
+                `;
+
+                return res.status(response.status).json({ message: `REST call failed (Status ${response.status}): ${errorText}`, flowLog });
             }
 
             addLog(`Successfully marked as ${desiredStatus} (Blue Badge via REST)`);
