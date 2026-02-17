@@ -241,7 +241,7 @@ export default async function handler(
 
                             // If we want "In Transit" / "Out for Delivery", we need the fulfillment to be OPEN.
                             if (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery') {
-                                // Extract tracking info robustly
+                                // Extraction of tracking info
                                 const trackingNumber = body.awb_no || body.data?.awb_no || body.tracking_number || body.data?.tracking_number || 'PENDING';
                                 const trackingCompany = body.tracking_company || body.data?.tracking_company || 'Local Delivery';
                                 const trackingUrl = body.tracking_url || body.data?.tracking_url;
@@ -253,7 +253,12 @@ export default async function handler(
                                 if (trackingUrl) fulfillmentParams.tracking_info.url = trackingUrl;
                                 
                                 fulfillmentParams.notify_customer = true; 
-                                addLog('Extracted tracking info', { trackingNumber, trackingCompany });
+                                
+                                // NEW: Set status to 'open' so it shows as Blue "Out for delivery" in the list view,
+                                // instead of the default 'success' which shows as Grey "Fulfilled".
+                                fulfillmentParams.status = 'open';
+                                
+                                addLog('Extracted tracking info and set status to open', { trackingNumber, trackingCompany });
                             }
 
                             // @ts-ignore
