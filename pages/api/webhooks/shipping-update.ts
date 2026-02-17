@@ -38,7 +38,8 @@ export default async function handler(
         tagging_enabled: false,
         tag_name: 'test-ofd',
         fulfillment_update_enabled: false,
-        fulfillment_status: 'in_transit'
+        fulfillment_status: 'in_transit',
+        test_email: ''
     };
 
     try {
@@ -50,8 +51,6 @@ export default async function handler(
         addLog('Settings Loaded', settings);
     } catch (sError) {
         console.error('Error loading settings:', sError);
-        // Fail open with defaults or current behavior? 
-        // Let's assume defaults if DB fails, but log it.
         addLog('Error loading settings', { message: 'Using defaults' });
     }
 
@@ -59,6 +58,24 @@ export default async function handler(
         addLog('System Disabled', { message: 'Skipping processing' });
         console.log('System is disabled. Skipping webhook.');
         return res.status(200).json({ message: 'System disabled' });
+    }
+
+    // Extraction helper for Order ID and Email
+    let orderId = body.id || (body.data?.order?.id);
+    let customerEmail = body.email || (body.data?.order?.email) || (body.customer?.email);
+
+    addLog('Payload identifiers extracted', { orderId, customerEmail });
+
+    // Safety Filter: Test Email
+    if (settings.test_email && settings.test_email.trim() !== '') {
+        const filterEmail = settings.test_email.trim().toLowerCase();
+        const actualEmail = (customerEmail || '').trim().toLowerCase();
+        
+        if (filterEmail !== actualEmail) {
+            addLog('Skipped: Test Email Mismatch', { actual: actualEmail, required: filterEmail });
+            return res.status(200).json({ message: `Skipping: Test mode active for ${filterEmail}` });
+        }
+        addLog('Test Email Matched', { email: actualEmail });
     }
 
     // Processing Summary
@@ -81,14 +98,9 @@ export default async function handler(
             summary JSONB
           );
         `;
-        // Ensure column exists (idempotent-ish via catch or explicit check, let's just allow it to fail silently if exists or use a separate migration step in real app. 
-        // For now, we'll just try to add it safely if we can, or rely on the INSERT to fail if column missing? 
-        // Better: alter table if not exists is hard in standard SQL without a function. 
-        // Let's just try to ADD COLUMN and ignore error, or assume it exists after this run.
         try {
             await sql`ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS summary JSONB;`;
         } catch (e) {
-            // ignore if column exists or other non-critical error
             console.log('Column add error (ignorable):', e);
         }
 
@@ -101,19 +113,10 @@ export default async function handler(
       }
     };
 
-    let orderId = body.id;
-    addLog('Initial Order ID check', { orderId });
-    
-    // Handle nested payload from shipping provider
-    if (!orderId && body.data && body.data.order && body.data.order.id) {
-      orderId = body.data.order.id;
-      addLog('Found Order ID in nested payload', { orderId });
-    }
-
     if (!orderId) {
-       addLog('Error: No Order ID found');
-       await logEvent('ERROR', 'No Order ID found', body);
-       return res.status(400).json({ message: 'No Order ID found' });
+        addLog('Error: No Order ID found');
+        await logEvent('ERROR', 'No Order ID found', body);
+        return res.status(400).json({ message: 'No Order ID found' });
     }
 
     addLog('Processing Order', { orderId });

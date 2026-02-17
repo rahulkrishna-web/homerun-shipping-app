@@ -57,7 +57,8 @@ export default function Logs() {
       tagging_enabled: false,
       tag_name: '',
       fulfillment_update_enabled: false,
-      fulfillment_status: 'in_transit'
+      fulfillment_status: 'in_transit',
+      test_email: ''
   });
 
   useEffect(() => {
@@ -67,7 +68,8 @@ export default function Logs() {
               tagging_enabled: settingsData.tagging_enabled ?? false,
               tag_name: settingsData.tag_name ?? '',
               fulfillment_update_enabled: settingsData.fulfillment_update_enabled ?? false,
-              fulfillment_status: settingsData.fulfillment_status ?? 'in_transit'
+              fulfillment_status: settingsData.fulfillment_status ?? 'in_transit',
+              test_email: settingsData.test_email ?? ''
           });
       }
   }, [settingsData]);
@@ -365,6 +367,15 @@ export default function Logs() {
                             onChange={(value) => setSettingsForm(s => ({ ...s, fulfillment_status: value }))}
                         />
                     )}
+                    <Text variant="headingMd" as="h3">Testing & Safety</Text>
+                    <TextField
+                        label="Test Email"
+                        value={settingsForm.test_email}
+                        onChange={(value) => setSettingsForm(s => ({ ...s, test_email: value }))}
+                        autoComplete="off"
+                        helpText="If set, the app will ONLY process orders from this customer email. Leave blank for all orders."
+                        placeholder="e.g. test@example.com"
+                    />
                 </FormLayout>
             </Modal.Section>
         </Modal>

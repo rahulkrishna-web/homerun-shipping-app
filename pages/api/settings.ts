@@ -15,7 +15,8 @@ export default async function handler(
         tagging_enabled: false,
         tag_name: 'test-ofd',
         fulfillment_update_enabled: false,
-        fulfillment_status: 'in_transit'
+        fulfillment_status: 'in_transit',
+        test_email: ''
       };
 
       result.rows.forEach(row => {
@@ -39,7 +40,7 @@ export default async function handler(
     }
   } else if (req.method === 'POST') {
     try {
-      const { system_enabled, tagging_enabled, tag_name, fulfillment_update_enabled, fulfillment_status } = req.body;
+      const { system_enabled, tagging_enabled, tag_name, fulfillment_update_enabled, fulfillment_status, test_email } = req.body;
       
       // Upsert each setting
       const updates = [
@@ -47,7 +48,8 @@ export default async function handler(
         { key: 'tagging_enabled', value: tagging_enabled },
         { key: 'tag_name', value: tag_name },
         { key: 'fulfillment_update_enabled', value: fulfillment_update_enabled },
-        { key: 'fulfillment_status', value: fulfillment_status }
+        { key: 'fulfillment_status', value: fulfillment_status },
+        { key: 'test_email', value: test_email }
       ];
 
       for (const update of updates) {
