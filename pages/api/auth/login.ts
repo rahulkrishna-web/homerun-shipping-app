@@ -8,7 +8,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   }
 
   // Define scopes
-  const scopes = 'write_orders,read_orders';
+  const scopes = 'write_orders,read_orders,write_fulfillments,read_fulfillments,write_merchant_managed_fulfillment_orders';
   
   // Build redirect URL
   // We assume the user will visit this from their local machine or Vercel deployment.
