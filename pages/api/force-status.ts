@@ -66,14 +66,25 @@ export default async function handler(
         if (openFO) {
             addLog('Found Fulfillment Order to mark', { id: openFO.id, currentStatus: openFO.status });
             
-            // For "Out for Delivery", we use the specific endpoint.
-            // For others (Ready, In Transit), we use "Ready for Delivery" as the base Blue state.
             const endpoint = desiredStatus === 'out_for_delivery' ? 'mark_as_out_for_delivery' : 'mark_as_ready_for_delivery';
-            const url = `fulfillment_orders/${openFO.id}/${endpoint}.json`;
+            const url = `https://${process.env.SHOPIFY_SHOP_DOMAIN}/admin/api/2024-01/fulfillment_orders/${openFO.id}/${endpoint}.json`;
             
-            // @ts-ignore
-            await shopify.request(url, 'POST');
-            addLog(`Successfully marked as ${endpoint} (REST)`);
+            addLog(`Calling REST: ${url}`);
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN || '',
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                addLog('REST call failed', { status: response.status, error: errorText });
+                return res.status(response.status).json({ message: `REST call failed: ${errorText}`, flowLog });
+            }
+
+            addLog(`Successfully marked as ${desiredStatus} (Blue Badge via REST)`);
             
             // Log to DB
             await sql`

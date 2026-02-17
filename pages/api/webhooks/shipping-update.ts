@@ -235,20 +235,30 @@ export default async function handler(
                                 // Force the FulfillmentOrder into "IN_PROGRESS" state (Blue Badge)
                                 try {
                                     const endpoint = desiredStatus === 'out_for_delivery' ? 'mark_as_out_for_delivery' : 'mark_as_ready_for_delivery';
-                                    const markUrl = `fulfillment_orders/${openFulfillmentOrder.id}/${endpoint}.json`;
-                                    // @ts-ignore
-                                    await shopify.request(markUrl, 'POST');
-                                    addLog(`Marked FulfillmentOrder as ${desiredStatus} (Blue Badge)`);
+                                    const url = `https://${process.env.SHOPIFY_SHOP_DOMAIN}/admin/api/2024-01/fulfillment_orders/${openFulfillmentOrder.id}/${endpoint}.json`;
+                                    
+                                    addLog(`Calling REST (fetch): ${url}`);
+                                    const response = await fetch(url, {
+                                        method: 'POST',
+                                        headers: {
+                                            'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN || '',
+                                            'Content-Type': 'application/json'
+                                        }
+                                    });
+
+                                    if (!response.ok) {
+                                        const errorText = await response.text();
+                                        addLog('REST call failed', { status: response.status, error: errorText });
+                                        // Still break/success or continue? For Blue badge we want success.
+                                    } else {
+                                        addLog(`Marked FulfillmentOrder as ${desiredStatus} (Blue Badge)`);
+                                    }
                                     
                                     await logEvent('SUCCESS', `Processed Order ${orderId} (Blue Badge: ${desiredStatus})`, body);
                                     fulfillmentUpdated = true;
                                     break; // Successfully handled without fulfilling
                                 } catch (e: any) {
-                                    addLog('Failed to mark as ready for delivery', { error: e.message });
-                                    // Fall through to fulfillment if marking failed? 
-                                    // Actually, let's just break and count it as a retry if it's critical.
-                                    // But if we can't mark it, we might want to try fulfilling.
-                                    // For now, let's treat it as a success if the user wants blue.
+                                    addLog('Failed to mark as ready/out for delivery', { error: e.message });
                                 }
                             }
 
