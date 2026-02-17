@@ -241,6 +241,16 @@ export default async function handler(
 
                             // If we want "In Transit" / "Out for Delivery", we need the fulfillment to be OPEN.
                             if (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery') {
+                                // NEW: Force the FulfillmentOrder into "IN_PROGRESS" state (Blue Badge)
+                                try {
+                                    const markUrl = `/fulfillment_orders/${openFulfillmentOrder.id}/mark_as_ready_for_delivery.json`;
+                                    // @ts-ignore
+                                    await shopify.request(markUrl, 'POST');
+                                    addLog('Marked FulfillmentOrder as Ready for Delivery (Blue Badge)');
+                                } catch (e: any) {
+                                    addLog('Failed to mark as ready for delivery', { error: e.message });
+                                }
+
                                 // Extraction of tracking info
                                 const trackingNumber = body.awb_no || body.data?.awb_no || body.tracking_number || body.data?.tracking_number || 'PENDING';
                                 const trackingCompany = body.tracking_company || body.data?.tracking_company || 'Local Delivery';
