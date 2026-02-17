@@ -34,11 +34,24 @@ export default async function handler(
     // 1. Fetch Order and Fulfillments
     let order;
     try {
-        order = await shopify.order.get(orderId, { fields: 'id,name,fulfillments,tags' });
+        // If orderId is not a number, try searching by name
+        if (isNaN(Number(orderId))) {
+            addLog('OrderId is not numeric, searching by name', { name: orderId });
+            const foundOrders = await shopify.order.list({ name: orderId, status: 'any', limit: 1 });
+            if (foundOrders.length > 0) {
+                order = foundOrders[0];
+                addLog('Order found by name', { id: order.id });
+            } else {
+                return res.status(404).json({ message: `Order Name ${orderId} not found` });
+            }
+        } else {
+            order = await shopify.order.get(orderId, { fields: 'id,name,fulfillments,tags' });
+        }
     } catch (e: any) {
-        return res.status(404).json({ message: `Order ${orderId} not found` });
+        return res.status(404).json({ message: `Order ${orderId} not found: ${e.message}` });
     }
 
+    const orderNumericId = order.id;
     const fulfillments = order.fulfillments || [];
     addLog('Order Fetched', { name: order.name, fulfillmentCount: fulfillments.length });
 
@@ -54,7 +67,7 @@ export default async function handler(
         if (openFulfillment.status === 'success' && (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery')) {
             try {
                 addLog('Attempting to re-open fulfillment');
-                await shopify.fulfillment.open(orderId, openFulfillment.id);
+                await shopify.fulfillment.open(orderNumericId, openFulfillment.id);
                 addLog('Fulfillment re-opened');
             } catch (e: any) {
                 addLog('Re-open failed (already open or not supported)', { error: e.message });
@@ -62,13 +75,13 @@ export default async function handler(
         }
 
         addLog(`Creating fulfillment event: ${desiredStatus}`);
-        await shopify.fulfillmentEvent.create(orderId, openFulfillment.id, { status: desiredStatus });
+        await shopify.fulfillmentEvent.create(orderNumericId, openFulfillment.id, { status: desiredStatus });
         addLog('Fulfillment event created successfully');
     } else {
         // Strategy B: Create fulfillment from Fulfillment Order
         addLog('No active fulfillment found. Checking Fulfillment Orders...');
         // @ts-ignore
-        const fulfillmentOrders = await shopify.order.fulfillmentOrders(orderId);
+        const fulfillmentOrders = await shopify.order.fulfillmentOrders(orderNumericId);
         const openFO = fulfillmentOrders.find((fo: any) => fo.status === 'open' || fo.status === 'in_progress');
 
         if (openFO) {
@@ -92,14 +105,14 @@ export default async function handler(
             // Explicitly open if it defaulted to success
             if (newF.status === 'success' && (desiredStatus === 'in_transit' || desiredStatus === 'out_for_delivery')) {
                 try {
-                    await shopify.fulfillment.open(orderId, newF.id);
+                    await shopify.fulfillment.open(orderNumericId, newF.id);
                     addLog('Fulfillment explicitly opened');
                 } catch (e) {}
             }
 
-            // Small delay for Shopify to catch up
-            await new Promise(r => setTimeout(r, 1000));
-            await shopify.fulfillmentEvent.create(orderId, newF.id, { status: desiredStatus });
+            // More delay for Shopify to catch up
+            await new Promise(r => setTimeout(r, 3000));
+            await shopify.fulfillmentEvent.create(orderNumericId, newF.id, { status: desiredStatus });
             addLog('Fulfillment event created');
         } else {
             addLog('No open fulfillment orders found. Cannot force status change.');
