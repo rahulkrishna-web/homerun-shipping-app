@@ -235,7 +235,7 @@ export default async function handler(
                                 // Force the FulfillmentOrder into "IN_PROGRESS" state (Blue Badge)
                                 try {
                                     const endpoint = desiredStatus === 'out_for_delivery' ? 'mark_as_out_for_delivery' : 'mark_as_ready_for_delivery';
-                                    const markUrl = `/fulfillment_orders/${openFulfillmentOrder.id}/${endpoint}.json`;
+                                    const markUrl = `fulfillment_orders/${openFulfillmentOrder.id}/${endpoint}.json`;
                                     // @ts-ignore
                                     await shopify.request(markUrl, 'POST');
                                     addLog(`Marked FulfillmentOrder as ${desiredStatus} (Blue Badge)`);

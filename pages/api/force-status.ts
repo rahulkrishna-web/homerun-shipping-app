@@ -69,7 +69,7 @@ export default async function handler(
             // For "Out for Delivery", we use the specific endpoint.
             // For others (Ready, In Transit), we use "Ready for Delivery" as the base Blue state.
             const endpoint = desiredStatus === 'out_for_delivery' ? 'mark_as_out_for_delivery' : 'mark_as_ready_for_delivery';
-            const url = `/fulfillment_orders/${openFO.id}/${endpoint}.json`;
+            const url = `fulfillment_orders/${openFO.id}/${endpoint}.json`;
             
             // @ts-ignore
             await shopify.request(url, 'POST');
